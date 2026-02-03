@@ -1,132 +1,124 @@
 import streamlit as st
 import requests
 from supabase import create_client
+from datetime import datetime, timedelta
 
 # ==========================================
-# 1. CONFIGURACIÓN Y CREDENCIALES
+# 1. CREDENCIALES
 # ==========================================
 URL_SUPABASE = "https://xavzjoyjausutoscosaw.supabase.co"
 KEY_SUPABASE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhdnpqb3lqYXVzdXRvc2Nvc2F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NjAwNzksImV4cCI6MjA4NTUzNjA3OX0.YjHw-NVeuVpK5l4XkM3hft1vSrERRBXEWZl2wPNjZ0k"
-API_KEY = "7ec8e70df61e8ff10111253b825be068" # <-- Pon tu clave de 32 caracteres
+# Asegúrate de colocar tu API KEY activa aquí:
+API_KEY = "7ec8e70df61e8ff10111253b825be068" 
 
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 headers = {'x-apisports-key': API_KEY.strip()}
 
+# ==========================================
+# 2. UI Y ESTILO PREMIUM
+# ==========================================
 st.set_page_config(page_title="Progol Élite", page_icon="⚽", layout="centered")
 
-# ==========================================
-# 2. DISEÑO PREMIUM (CSS INYECTADO)
-# ==========================================
 st.markdown("""
     <style>
-    .stApp {
-        background: radial-gradient(circle, #1a1c23 0%, #050505 100%) !important;
-    }
-    
-    .fijo-card {
-        background: linear-gradient(135deg, #FF4B4B 0%, #8B0000 100%);
-        padding: 25px;
-        border-radius: 20px;
-        text-align: center;
-        border: 2px solid #FF7676;
-        box-shadow: 0px 0px 25px rgba(255, 75, 75, 0.4);
-        margin-bottom: 30px;
-    }
-
+    .stApp { background: radial-gradient(circle, #1a1c23 0%, #050505 100%) !important; }
     .match-card {
-        background: rgba(255, 255, 255, 0.05);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 15px;
-        padding: 20px;
-        margin-bottom: 15px;
-        transition: 0.3s;
+        border-radius: 15px; padding: 15px; margin-bottom: 12px;
     }
-
-    .team-name {
-        color: white !important;
-        font-weight: 800;
-        font-size: 18px;
-        text-transform: uppercase;
-        width: 40%;
-    }
-
+    .team-name { color: white !important; font-weight: 700; font-size: 14px; text-transform: uppercase; width: 40%; }
     .score-box {
-        background: #000;
-        color: #00FF41;
-        font-size: 28px;
-        font-weight: bold;
-        padding: 8px 18px;
-        border-radius: 10px;
-        border: 2px solid #00FF41;
-        box-shadow: 0px 0px 15px rgba(0, 255, 65, 0.4);
+        background: #000; color: #00FF41; font-size: 24px; font-weight: bold;
+        padding: 5px 12px; border-radius: 8px; border: 1px solid #00FF41;
+        min-width: 75px; text-align: center;
+        box-shadow: 0px 0px 10px rgba(0, 255, 65, 0.1);
     }
-
-    h1, h2, h3 { color: white !important; }
+    .status-tag { text-align: center; color: #666; font-size: 10px; margin-top: 8px; font-weight: bold; }
+    h1 { color: white !important; font-family: 'Arial Black'; text-align: center; margin-bottom: 30px; letter-spacing: -1px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. CABECERA Y EL FIJO
+# 3. FUNCIONES DE DATOS
 # ==========================================
-st.markdown("<h1 style='text-align: center;'>PROGOL ÉLITE</h1>", unsafe_allow_html=True)
 
-st.markdown("""
-    <div class="fijo-card">
-        <div style="font-size: 14px; letter-spacing: 2px; color: #FFD700; font-weight: bold;">📍 FIJO DE LA SEMANA</div>
-        <div style="font-size: 32px; font-weight: 900; margin: 10px 0; color: white;">VALENCIA CF</div>
-        <div style="font-size: 14px; opacity: 0.9;">Probabilidad de éxito: 82%</div>
-    </div>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# ==========================================
-# 4. LÓGICA DE PARTIDOS (CON MARCADORES REALES)
-# ==========================================
-@st.cache_data(ttl=300) # Guarda los resultados por 5 minutos para ahorrar API
-def obtener_marcadores(ids):
-    url = f"https://v3.football.api-sports.io/fixtures?ids={ids}"
+@st.cache_data(ttl=600)
+def consultar_partido(f_id):
+    if not f_id: return None
+    url = f"https://v3.football.api-sports.io/fixtures?id={f_id}"
     try:
-        res = requests.get(url, headers=headers).json()
-        return {f['fixture']['id']: f for f in res.get('response', [])}
+        r = requests.get(url, headers=headers).json()
+        if r.get('response') and len(r['response']) > 0:
+            return r['response'][0]
     except:
-        return {}
+        return None
+    return None
+
+# ==========================================
+# 4. INTERFAZ PRINCIPAL
+# ==========================================
+st.markdown("<h1>⚽ PROGOL ÉLITE</h1>", unsafe_allow_html=True)
 
 try:
-    res_db = supabase.table("quinielas_activas").select("*").order("casilla").execute()
-    partidos = res_db.data
-
-    if partidos:
-        # Extraemos todos los IDs para hacer una sola consulta a la API
-        ids_cadena = ",".join([str(p['fixture_id']) for p in partidos])
-        datos_api = obtener_marcadores(ids_cadena)
-
-        for p in partidos:
-            f_id = p['fixture_id']
-            info = datos_api.get(f_id, {})
+    # Traer datos de Supabase
+    respuesta = supabase.table("quinielas_activas").select("*").order("casilla").execute()
+    partidos_db = respuesta.data
+    
+    if partidos_db:
+        for p in partidos_db:
+            info = consultar_partido(p['fixture_id'])
             
-            # Extraer goles y estado
-            gl = info.get('goals', {}).get('home', 0) if info.get('goals', {}).get('home') is not None else 0
-            gv = info.get('goals', {}).get('away', 0) if info.get('goals', {}).get('away') is not None else 0
-            status = info.get('fixture', {}).get('status', {}).get('short', 'NS')
-            tiempo = info.get('fixture', {}).get('status', {}).get('elapsed', '')
+            # --- VALIDACIÓN DE GOLES (Cero si es None) ---
+            g_l = 0
+            g_v = 0
+            if info and info.get('goals'):
+                g_l = info['goals'].get('home') if info['goals'].get('home') is not None else 0
+                g_v = info['goals'].get('away') if info['goals'].get('away') is not None else 0
+            
+            # Datos visuales
+            logo_l = info.get('teams', {}).get('home', {}).get('logo', '') if info else ""
+            logo_v = info.get('teams', {}).get('away', {}).get('logo', '') if info else ""
+            status_api = info.get('fixture', {}).get('status', {}).get('short', 'NS') if info else "NS"
+            
+            # Estatus y Fecha Local (México UTC-6)
+            st_txt = "PENDIENTE"
+            if info:
+                dt_utc = datetime.strptime(info['fixture']['date'], "%Y-%m-%dT%H:%M:%S+00:00")
+                dt_mx = dt_utc - timedelta(hours=6)
+                fecha_formateada = dt_mx.strftime("%d/%m %H:%M")
+                
+                if status_api in ["1H", "2H", "HT"]:
+                    st_txt = "EN VIVO"
+                elif status_api == "FT":
+                    st_txt = "FINAL"
+                else:
+                    st_txt = fecha_formateada
 
-            # Color del marcador: Verde si está en vivo, Blanco si no
-            color_marcador = "#00FF41" if status in ["1H", "2H", "HT"] else "white"
-            status_display = f"EN VIVO {tiempo}'" if status in ["1H", "2H", "HT"] else ("FINALIZADO" if status == "FT" else "PENDIENTE")
-
+            # Dibujar Tarjeta
             st.markdown(f"""
                 <div class="match-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div class="team-name" style="text-align: right;">{p['local_nombre']}</div>
-                        <div class="score-box" style="color: {color_marcador} !important;">{gl} - {gv}</div>
-                        <div class="team-name" style="text-align: left;">{p['visita_nombre']}</div>
+                        <div class="team-name" style="text-align: right;">
+                            {p['local_nombre']} <img src="{logo_l}" width="24" style="margin-left:8px">
+                        </div>
+                        <div class="score-box" style="color: {'#00FF41' if st_txt == 'EN VIVO' else 'white'};">
+                            {g_l} - {g_v}
+                        </div>
+                        <div class="team-name" style="text-align: left;">
+                            <img src="{logo_v}" width="24" style="margin-right:8px"> {p['visita_nombre']}
+                        </div>
                     </div>
-                    <div style="text-align: center; color: #555; font-size: 10px; margin-top: 10px; letter-spacing: 1px;">
-                        CASILLA {p['casilla']} | {status_display} | {p['liga']}
+                    <div class="status-tag">
+                        CASILLA {p['casilla']} | {st_txt} | {p['liga']}
                     </div>
                 </div>
             """, unsafe_allow_html=True)
+            
     else:
-        st.info("No se encontraron partidos guardados.")
+        st.markdown("<p style='text-align:center; color:gray;'>Cargando quiniela...</p>", unsafe_allow_html=True)
+            
 except Exception as e:
-    st.error(f"Error cargando marcadores: {e}")
+    pass
+
+st.markdown("<p style='text-align: center; color: #444; font-size: 11px; margin-top: 30px;'>Resultados actualizados cada 10 min</p>", unsafe_allow_html=True)
