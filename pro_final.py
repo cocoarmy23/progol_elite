@@ -4,19 +4,105 @@ from supabase import create_client
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. CREDENCIALES
+# 1. CREDENCIALES (UNIFICADAS)
 # ==========================================
 URL_SUPABASE = "https://xavzjoyjausutoscosaw.supabase.co"
 KEY_SUPABASE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhdnpqb3lqYXVzdXRvc2Nvc2F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NjAwNzksImV4cCI6MjA4NTUzNjA3OX0.YjHw-NVeuVpK5l4XkM3hft1vSrERRBXEWZl2wPNjZ0k"
-# Asegúrate de colocar tu API KEY activa aquí:
-API_KEY = "7ec8e70df61e8ff10111253b825be068" 
+# Usaremos Livescore-API que es la que te funcionó para guardar
+API_KEY = "GQM8r3pQM1JZSH4Z"
+SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
-headers = {'x-apisports-key': API_KEY.strip()}
 
 # ==========================================
-# 2. UI Y ESTILO PREMIUM
+# 2. UI Y ESTILO
 # ==========================================
+st.set_page_config(page_title="Admin Progol Premium", layout="wide")
+st.title("🏆 Panel Administrador: Quinielas Activas")
+st.markdown("---")
+
+# --- PASO 1: BÚSQUEDA DE IDS ---
+st.header("🔍 1. Localizar IDs (País/Liga)")
+col1, col2 = st.columns(2)
+with col1:
+    p_busqueda = st.text_input("Nombre del País", "Mexico")
+    if st.button("Buscar ID de País"):
+        r = requests.get(f"https://livescore-api.com/api-client/countries/list.json?key={API_KEY}&secret={SECRET}").json()
+        if r.get('success'):
+            st.table([p for p in r['data']['countries'] if p_busqueda.lower() in p['name'].lower()])
+
+with col2:
+    l_busqueda = st.text_input("Nombre de la Liga", "")
+    if st.button("Buscar ID de Liga"):
+        r = requests.get(f"https://livescore-api.com/api-client/competitions/list.json?key={API_KEY}&secret={SECRET}").json()
+        if r.get('success'):
+            st.table([l for l in r['data']['competitions'] if l_busqueda.lower() in l['name'].lower()])
+
+st.divider()
+
+# --- PASO 2: BUSCAR PARTIDOS ---
+st.header("⚽ 2. Buscar Partidos en la API")
+c1, c2, c3 = st.columns(3)
+with c1: id_p = st.text_input("ID País", "46")
+with c2: id_l = st.text_input("ID Liga (Opcional)", "")
+with c3: fecha = st.date_input("Fecha de Partidos")
+
+url_api = f"https://livescore-api.com/api-client/fixtures/matches.json?key={API_KEY}&secret={SECRET}&date={fecha}&country_id={id_p}"
+if id_l: url_api += f"&competition_id={id_l}"
+
+if st.button("🚀 Cargar Partidos Disponibles"):
+    res = requests.get(url_api).json()
+    if res.get('success'):
+        partidos = res.get('data', {}).get('fixtures', [])
+        if partidos:
+            for f in partidos:
+                # Ajuste de hora a México
+                try:
+                    h_mx = (datetime.strptime(f['time'], "%H:%M:%S") - timedelta(hours=6)).strftime("%H:%M:%S")
+                except: h_mx = f['time']
+                
+                with st.container(border=True):
+                    ca1, ca2, ca3, ca4 = st.columns([1, 2, 2, 1])
+                    ca1.text_input("ID", f['id'], key=f"id_{f['id']}")
+                    ca2.text_input("Local", f['home_name'], key=f"h_{f['id']}")
+                    ca3.text_input("Visita", f['away_name'], key=f"a_{f['id']}")
+                    ca4.text_input("Hora MX", h_mx, key=f"t_{f['id']}")
+        else: st.warning("No hay partidos.")
+
+st.divider()
+
+# --- PASO 3: REGISTRO ---
+st.header("💾 3. Guardar en Base de Datos")
+with st.form("registro_supabase"):
+    cc1, cc2, cc3 = st.columns(3)
+    with cc1:
+        f_id = st.number_input("Fixture ID", step=1)
+        sorteo = st.number_input("Sorteo #", min_value=1, value=1)
+    with cc2:
+        local = st.text_input("Nombre Local")
+        visita = st.text_input("Nombre Visita")
+    with cc3:
+        casilla = st.number_input("Casilla (1-21)", 1, 21)
+        hora_mx = st.text_input("Hora (HH:MM:SS)")
+
+    if st.form_submit_button("✅ Registrar Partido"):
+        payload = {
+            "sorteo_numero": sorteo, "casilla": casilla, "fixture_id": f_id,
+            "local_nombre": local, "visita_nombre": visita, "hora_mx": hora_mx,
+            "estado_partido": "Programado"
+        }
+        try:
+            supabase.table("quinielas_activas").insert(payload).execute()
+            st.success(f"¡Casilla {casilla} registrada!")
+            st.balloons()
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# --- MONITOR ---
+st.divider()
+if st.button("📊 Ver lo que ya está guardado"):
+    data = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo).order("casilla").execute()
+    st.write(data.data)
 st.set_page_config(page_title="Progol Élite", page_icon="⚽", layout="centered")
 
 st.markdown("""
@@ -122,3 +208,4 @@ except Exception as e:
     pass
 
 st.markdown("<p style='text-align: center; color: #444; font-size: 11px; margin-top: 30px;'>Resultados actualizados cada 10 min</p>", unsafe_allow_html=True)
+
