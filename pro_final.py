@@ -4,7 +4,7 @@ from supabase import create_client
 from datetime import datetime
 
 # ==========================================
-# 1. CREDENCIALES Y CONEXIÓN
+# 1. CREDENCIALES
 # ==========================================
 URL_SUPABASE = "https://xavzjoyjausutoscosaw.supabase.co"
 KEY_SUPABASE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhdnpqb3lqYXVzdXRvc2Nvc2F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NjAwNzksImV4cCI6MjA4NTUzNjA3OX0.YjHw-NVeuVpK5l4XkM3hft1vSrERRBXEWZl2wPNjZ0k"
@@ -14,89 +14,80 @@ SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 
 # ==========================================
-# 2. CONFIGURACIÓN Y ESTILO PREMIUM (TU DISEÑO)
+# 2. ESTILO COMPACTO Y LIMPIO
 # ==========================================
-st.set_page_config(page_title="Progol Live Premium", layout="wide")
+st.set_page_config(page_title="Progol Live", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .stApp { background: linear-gradient(135deg, #0e1117 0%, #1c2531 100%); }
     .match-card {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 15px;
-        padding: 20px;
-        border-left: 5px solid #00ff88;
-        margin-bottom: 15px;
-        transition: transform 0.3s;
+        background: #1c2531;
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 10px;
+        border-left: 4px solid #00ff88;
+        color: white;
     }
-    .match-card:hover { transform: scale(1.02); background: rgba(255, 255, 255, 0.08); }
-    .live-indicator { color: #ff4b4b; font-weight: bold; animation: blinker 1.5s linear infinite; }
+    .live-border { border-left-color: #ff4b4b !important; }
+    .score { font-size: 22px; font-weight: bold; color: #fff; }
+    .team { font-size: 16px; color: #e0e0e0; font-weight: 500; }
+    .minute { background: #ff4b4b; color: white; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+    .blink { animation: blinker 1.5s linear infinite; color: #ff4b4b; font-weight: bold; }
     @keyframes blinker { 50% { opacity: 0; } }
-    .score-text { font-size: 28px; font-weight: 800; color: #ffffff; }
-    .team-name { font-size: 18px; font-weight: 500; color: #e0e0e0; }
-    .minute-badge { background: #ff4b4b; color: white; padding: 2px 8px; border-radius: 5px; font-size: 14px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. LÓGICA DE DATOS
+# 3. LÓGICA DE FILTRADO (SOLO EL ÚLTIMO SORTEO)
 # ==========================================
 
-# A. Obtener automáticamente el sorteo más reciente para no mostrar los viejos
-try:
-    res_sorteo = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
-    sorteo_actual = res_sorteo.data[0]['sorteo_numero'] if res_sorteo.data else 0
-except:
-    sorteo_actual = 0
+# Buscamos el sorteo más alto registrado
+res_max = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
 
-st.title("🏆 Resultados Progol en Vivo")
-if sorteo_actual:
-    st.markdown(f"### 📍 Sorteo Actual: **#{sorteo_actual}**")
-else:
-    st.warning("No se encontraron sorteos activos.")
-
-# B. Consultar partidos de la DB y datos en vivo de la API
-if sorteo_actual > 0:
-    # Traer partidos de la DB
+if res_max.data:
+    sorteo_actual = res_max.data[0]['sorteo_numero']
+    st.title(f"🏆 Resultados Sorteo #{sorteo_actual}")
+    
+    # Traer solo partidos de ESE sorteo
     partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
     
-    # Traer datos en vivo de la API
-    url_live = f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}"
-    live_list = []
+    # Consultar API Live
+    live_map = {}
     try:
-        live_res = requests.get(url_live).json()
+        live_res = requests.get(f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}").json()
         if live_res.get('success'):
-            live_list = live_res.get('data', {}).get('match', [])
+            matches = live_res.get('data', {}).get('match', [])
+            live_map = {str(m['id']): m for m in matches}
     except: pass
-    
-    live_map = {str(m['id']): m for m in live_list}
 
     # ==========================================
-    # 4. RENDERIZADO DE CARTELERA
+    # 4. RENDERIZADO SIN ERRORES DE ETIQUETAS
     # ==========================================
     for p in partidos_db.data:
         f_id = str(p['fixture_id'])
         esta_en_vivo = f_id in live_map
         
-        # Datos a mostrar
-        marcador = live_map[f_id]['score'] if esta_en_vivo else "vs"
-        minuto = live_map[f_id]['time'] if esta_en_vivo else p['hora_mx']
-        status_color = "#ff4b4b" if esta_en_vivo else "#00ff88"
+        # Valores dinámicos
+        score = live_map[f_id]['score'] if esta_en_vivo else "vs"
+        time_display = f"<span class='blink'>● {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:gray;'>{p['hora_mx']}</span>"
+        card_class = "match-card live-border" if esta_en_vivo else "match-card"
 
+        # Usamos f-strings limpios para evitar el error de "texto en pantalla"
         st.markdown(f"""
-            <div class="match-card" style="border-left-color: {status_color}">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="flex: 1; text-align: right;" class="team-name">{p['local_nombre']}</div>
-                    <div style="flex: 1; text-align: center;">
-                        <div class="score-text">{marcador}</div>
-                        {"<span class='live-indicator'>● EN VIVO</span>" if esta_en_vivo else f"<span style='color:gray;'>{minuto}</span>"}
-                        {f"<br><span class='minute-badge'>{minuto}'</span>" if esta_en_vivo else ""}
+            <div class="{card_class}">
+                <div style="display: flex; justify-content: space-between; align-items: center; text-align: center;">
+                    <div style="width: 35%; text-align: right;" class="team">{p['local_nombre']}</div>
+                    <div style="width: 30%;">
+                        <div class="score">{score}</div>
+                        {time_display}
                     </div>
-                    <div style="flex: 1; text-align: left;" class="team-name">{p['visita_nombre']}</div>
+                    <div style="width: 35%; text-align: left;" class="team">{p['visita_nombre']}</div>
                 </div>
-                <div style="font-size: 12px; color: gray; margin-top: 10px;">Casilla {p['casilla']} | Sorteo {p['sorteo_numero']}</div>
+                <div style="font-size: 10px; color: #888; margin-top: 5px;">Casilla {p['casilla']}</div>
             </div>
         """, unsafe_allow_html=True)
 
-st.button("🔄 Actualizar Marcadores")
+else:
+    st.error("No se encontraron quinielas en la base de datos.")
+
+st.button("🔄 Actualizar")
