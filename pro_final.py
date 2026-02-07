@@ -4,8 +4,8 @@ from supabase import create_client
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# 1. CONFIGURACIÓN Y REFRESCO (Cada 1 minuto)
-st_autorefresh(interval=60000, key="api_update")
+# 1. CONFIGURACIÓN Y REFRESCO
+st_autorefresh(interval=60000, key="sorteo_api_update")
 st.set_page_config(page_title="Progol Live Elite", layout="wide")
 
 # 2. CREDENCIALES
@@ -20,82 +20,92 @@ supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: white; }
+    .header-sorteo { background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; border: 1px solid #3e5f8a; }
     .match-card { background: #1c2531; border-radius: 15px; padding: 20px; margin-bottom: 15px; border-left: 5px solid #2e7d32; }
     .score-box { font-size: 32px; font-weight: 900; background: #000; padding: 10px; border-radius: 8px; min-width: 110px; text-align: center; color: #00ff88; border: 1px solid #333; }
+    .status-live { color: #ff4b4b; font-weight: bold; animation: blinker 1.5s linear infinite; }
+    @keyframes blinker { 50% { opacity: 0; } }
     .logo-container { background: white; border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin: 0 auto; }
-    .team-logo { width: 40px; height: 40px; object-fit: contain; }
+    .team-logo { width: 42px; height: 42px; object-fit: contain; }
     </style>
 """, unsafe_allow_html=True)
 
-# 4. FUNCIÓN MAESTRA DE BÚSQUEDA
-def obtener_data_api():
-    # Usamos la fecha actual para el parámetro 'from' según tus pruebas exitosas
-    fecha_consulta = datetime.now().strftime('%Y-%m-%d')
-    url = f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_consulta}"
-    
-    try:
-        response = requests.get(url, timeout=15).json()
-        if response.get('success'):
-            # Retornamos la lista de partidos (la 'página 1' del historial reciente)
-            return response.get('data', {}).get('match', [])
-    except:
-        return []
-    return []
+# 4. FUNCIÓN DE BARRIDO API (Páginas 1, 2 y Live)
+def obtener_datos_completos_api():
+    bolsa_partidos = []
+    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+    urls = [
+        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=1",
+        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=2",
+        f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}"
+    ]
+    for url in urls:
+        try:
+            res = requests.get(url, timeout=10).json()
+            if res.get('success'):
+                matches = res.get('data', {}).get('match', [])
+                if isinstance(matches, list): bolsa_partidos.extend(matches)
+        except: continue
+    return bolsa_partidos
 
-# 5. LÓGICA PRINCIPAL
+# 5. LÓGICA DE FILTRADO POR SORTEO MÁS RECIENTE
 try:
-    # Traer partidos de tu DB
-    partidos_db = supabase.table("quinielas_activas").select("*").order("casilla").execute().data
+    # A. Obtener el número del sorteo más alto disponible
+    query_sorteo = supabase.table("quinielas_activas").select("sorteo").order("sorteo", desc=True).limit(1).execute()
     
-    # Traer todos los partidos de hoy de la API
-    partidos_api = obtener_data_api()
+    if query_sorteo.data:
+        ultimo_sorteo = query_sorteo.data[0]['sorteo']
+        st.markdown(f'<div class="header-sorteo">🏆 <b>PROGOL - SORTEO {ultimo_sorteo}</b></div>', unsafe_allow_html=True)
 
-    for p in partidos_db:
-        id_buscado = str(p['fixture_id']).strip()
-        nombre_local_db = p['local_nombre'].upper()
+        # B. Traer solo los partidos de ese sorteo
+        partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo", ultimo_sorteo).order("casilla").execute().data
         
-        # Buscamos el partido dentro de la respuesta de la API
-        match_encontrado = None
-        for m in partidos_api:
-            id_api = str(m.get('id')).strip()
-            nombre_api_local = str(m.get('home_name')).upper()
+        # C. Traer datos de API
+        api_pool = obtener_datos_completos_api()
+
+        # D. Pintar partidos
+        for p in partidos_db:
+            id_buscado = str(p['fixture_id']).strip()
+            local_db = p['local_nombre'].upper()
             
-            # CRITERIO DE BÚSQUEDA: Que coincida el ID O que el nombre esté contenido
-            if id_api == id_buscado or nombre_local_db in nombre_api_local:
-                match_encontrado = m
-                break
-        
-        # Asignar marcador y estado
-        if match_encontrado:
-            marcador = match_encontrado.get('score', '0 - 0')
-            tiempo = str(match_encontrado.get('time', '')).upper()
-            status_txt = "✅ FINALIZADO" if tiempo == "FT" else f"🔴 EN VIVO {tiempo}'"
-        else:
-            marcador = f"{p.get('marcador_local', 0)} - {p.get('marcador_visita', 0)}"
-            status_txt = f"🕒 {p['hora_mx']}"
+            match_data = None
+            for m in api_pool:
+                if str(m.get('id')).strip() == id_buscado or local_db in str(m.get('home_name')).upper():
+                    match_data = m
+                    break
+            
+            if match_data:
+                marcador = match_data.get('score', '0 - 0')
+                tiempo = str(match_data.get('time', '')).upper()
+                status_html = '<span style="color: #00ff88;">✅ FINALIZADO</span>' if tiempo == "FT" else f'<span class="status-live">🔴 EN VIVO {tiempo}\'</span>'
+            else:
+                marcador = f"{p.get('marcador_local', 0)} - {p.get('marcador_visita', 0)}"
+                status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
 
-        # RENDERIZADO DE TARJETA
-        l_logo = f"https://tse1.mm.bing.net/th?q={p['local_nombre']}+logo+football&w=100&h=100&c=7"
-        v_logo = f"https://tse1.mm.bing.net/th?q={p['visita_nombre']}+logo+football&w=100&h=100&c=7"
+            # Logos
+            l_logo = f"https://tse1.mm.bing.net/th?q={p['local_nombre']}+football+logo&w=100&h=100&c=7"
+            v_logo = f"https://tse1.mm.bing.net/th?q={p['visita_nombre']}+football+logo&w=100&h=100&c=7"
 
-        st.markdown(f"""
-            <div class="match-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; text-align:center;">
-                    <div style="width:35%;">
-                        <div class="logo-container"><img src="{l_logo}" class="team-logo"></div>
-                        <div style="margin-top:10px; font-weight:bold;">{p['local_nombre']}</div>
-                    </div>
-                    <div style="width:30%;">
-                        <div class="score-box">{marcador}</div>
-                        <div style="margin-top:10px; font-size:12px; font-weight:bold; color:#aaa;">{status_txt}</div>
-                    </div>
-                    <div style="width:35%;">
-                        <div class="logo-container"><img src="{v_logo}" class="team-logo"></div>
-                        <div style="margin-top:10px; font-weight:bold;">{p['visita_nombre']}</div>
+            st.markdown(f"""
+                <div class="match-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; text-align:center;">
+                        <div style="width:35%;">
+                            <div class="logo-container"><img src="{l_logo}" class="team-logo"></div>
+                            <div style="margin-top:10px; font-weight:bold;">{p['local_nombre']}</div>
+                        </div>
+                        <div style="width:30%;">
+                            <div class="score-box">{marcador}</div>
+                            <div style="margin-top:10px; font-size:13px;">{status_html}</div>
+                        </div>
+                        <div style="width:35%;">
+                            <div class="logo-container"><img src="{v_logo}" class="team-logo"></div>
+                            <div style="margin-top:10px; font-weight:bold;">{p['visita_nombre']}</div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+    else:
+        st.warning("No hay sorteos activos en la base de datos.")
 
 except Exception as e:
-    st.error(f"Error cargando datos: {e}")
+    st.error(f"Error en la sincronización: {e}")
