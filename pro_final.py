@@ -14,41 +14,46 @@ SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 
 # ==========================================
-# 2. ESTILO COMPACTO Y LIMPIO
+# 2. ESTILO PREMIUM OSCURO (FORZADO)
 # ==========================================
 st.set_page_config(page_title="Progol Live", layout="wide")
 
 st.markdown("""
     <style>
+    /* Forzar fondo oscuro en toda la app */
+    .stApp {
+        background-color: #0e1117 !important;
+        color: white !important;
+    }
     .match-card {
         background: #1c2531;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 10px;
-        border-left: 4px solid #00ff88;
-        color: white;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 12px;
+        border-left: 5px solid #00ff88;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
     .live-border { border-left-color: #ff4b4b !important; }
-    .score { font-size: 22px; font-weight: bold; color: #fff; }
-    .team { font-size: 16px; color: #e0e0e0; font-weight: 500; }
-    .minute { background: #ff4b4b; color: white; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
-    .blink { animation: blinker 1.5s linear infinite; color: #ff4b4b; font-weight: bold; }
+    .score { font-size: 26px; font-weight: bold; color: #ffffff; margin: 0; }
+    .team { font-size: 16px; color: #ffffff; font-weight: 600; width: 40%; }
+    .blink { animation: blinker 1.5s linear infinite; color: #ff4b4b; font-weight: bold; font-size: 14px; }
     @keyframes blinker { 50% { opacity: 0; } }
+    .info-footer { font-size: 11px; color: #888; margin-top: 8px; border-top: 1px solid #2d3748; padding-top: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. LÓGICA DE FILTRADO (SOLO EL ÚLTIMO SORTEO)
+# 3. LÓGICA DE FILTRADO CRONOLÓGICO
 # ==========================================
 
-# Buscamos el sorteo más alto registrado
-res_max = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
+# Consultamos los sorteos ordenados por ID o creación para obtener el último ingresado
+res_db = supabase.table("quinielas_activas").select("sorteo_numero").order("created_at", desc=True).limit(1).execute()
 
-if res_max.data:
-    sorteo_actual = res_max.data[0]['sorteo_numero']
-    st.title(f"🏆 Resultados Sorteo #{sorteo_actual}")
+if res_db.data:
+    sorteo_actual = res_db.data[0]['sorteo_numero']
+    st.markdown(f"<h1 style='text-align: center; color: white;'>🏆 Sorteo #{sorteo_actual}</h1>", unsafe_allow_html=True)
     
-    # Traer solo partidos de ESE sorteo
+    # Traer partidos solo de ese sorteo
     partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
     
     # Consultar API Live
@@ -61,33 +66,36 @@ if res_max.data:
     except: pass
 
     # ==========================================
-    # 4. RENDERIZADO SIN ERRORES DE ETIQUETAS
+    # 4. RENDERIZADO DE TARJETAS
     # ==========================================
     for p in partidos_db.data:
         f_id = str(p['fixture_id'])
         esta_en_vivo = f_id in live_map
         
-        # Valores dinámicos
-        score = live_map[f_id]['score'] if esta_en_vivo else "vs"
-        time_display = f"<span class='blink'>● {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:gray;'>{p['hora_mx']}</span>"
-        card_class = "match-card live-border" if esta_en_vivo else "match-card"
+        # Marcador y Tiempo
+        score_display = live_map[f_id]['score'] if esta_en_vivo else "vs"
+        time_info = f"<span class='blink'>● EN VIVO {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:#888;'>{p['hora_mx']}</span>"
+        card_style = "match-card live-border" if esta_en_vivo else "match-card"
 
-        # Usamos f-strings limpios para evitar el error de "texto en pantalla"
-        st.markdown(f"""
-            <div class="{card_class}">
-                <div style="display: flex; justify-content: space-between; align-items: center; text-align: center;">
-                    <div style="width: 35%; text-align: right;" class="team">{p['local_nombre']}</div>
-                    <div style="width: 30%;">
-                        <div class="score">{score}</div>
-                        {time_display}
-                    </div>
-                    <div style="width: 35%; text-align: left;" class="team">{p['visita_nombre']}</div>
+        # HTML Limpio
+        card_html = f"""
+        <div class="{card_style}">
+            <div style="display: flex; justify-content: space-between; align-items: center; text-align: center;">
+                <div class="team" style="text-align: right;">{p['local_nombre']}</div>
+                <div style="width: 20%;">
+                    <div class="score">{score_display}</div>
+                    {time_info}
                 </div>
-                <div style="font-size: 10px; color: #888; margin-top: 5px;">Casilla {p['casilla']}</div>
+                <div class="team" style="text-align: left;">{p['visita_nombre']}</div>
             </div>
-        """, unsafe_allow_html=True)
+            <div class="info-footer">
+                Casilla {p['casilla']} | Estado: {"Jugándose" if esta_en_vivo else "Programado"}
+            </div>
+        </div>
+        """
+        st.markdown(card_html, unsafe_allow_html=True)
 
 else:
-    st.error("No se encontraron quinielas en la base de datos.")
+    st.markdown("<h3 style='text-align: center;'>No hay quinielas activas registradas.</h3>", unsafe_allow_html=True)
 
-st.button("🔄 Actualizar")
+st.button("🔄 Actualizar Resultados")
