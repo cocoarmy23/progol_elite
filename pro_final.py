@@ -3,7 +3,9 @@ import requests
 from supabase import create_client
 from datetime import datetime
 
-# --- CONFIGURACIÓN ---
+# ==========================================
+# 1. CREDENCIALES Y CONEXIÓN
+# ==========================================
 URL_SUPABASE = "https://xavzjoyjausutoscosaw.supabase.co"
 KEY_SUPABASE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhdnpqb3lqYXVzdXRvc2Nvc2F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NjAwNzksImV4cCI6MjA4NTUzNjA3OX0.YjHw-NVeuVpK5l4XkM3hft1vSrERRBXEWZl2wPNjZ0k"
 API_KEY = "GQM8r3pQM1JZSH4Z"
@@ -11,69 +13,90 @@ SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-st.set_page_config(page_title="Resultados Progol en Vivo", layout="centered")
+# ==========================================
+# 2. CONFIGURACIÓN Y ESTILO PREMIUM (TU DISEÑO)
+# ==========================================
+st.set_page_config(page_title="Progol Live Premium", layout="wide")
 
-# --- ESTILO ---
 st.markdown("""
     <style>
-    .live-card { padding: 15px; border-radius: 10px; border: 1px solid #ff4b4b; margin-bottom: 10px; background-color: #1e1e1e; }
-    .minute { color: #ff4b4b; font-weight: bold; font-size: 20px; }
-    .score { font-size: 24px; font-weight: bold; letter-spacing: 5px; }
+    .main { background-color: #0e1117; }
+    .stApp { background: linear-gradient(135deg, #0e1117 0%, #1c2531 100%); }
+    .match-card {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 15px;
+        padding: 20px;
+        border-left: 5px solid #00ff88;
+        margin-bottom: 15px;
+        transition: transform 0.3s;
+    }
+    .match-card:hover { transform: scale(1.02); background: rgba(255, 255, 255, 0.08); }
+    .live-indicator { color: #ff4b4b; font-weight: bold; animation: blinker 1.5s linear infinite; }
+    @keyframes blinker { 50% { opacity: 0; } }
+    .score-text { font-size: 28px; font-weight: 800; color: #ffffff; }
+    .team-name { font-size: 18px; font-weight: 500; color: #e0e0e0; }
+    .minute-badge { background: #ff4b4b; color: white; padding: 2px 8px; border-radius: 5px; font-size: 14px; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏆 Resultados en Vivo")
+# ==========================================
+# 3. LÓGICA DE DATOS
+# ==========================================
 
-# 1. Obtener el Sorteo más actual automáticamente
+# A. Obtener automáticamente el sorteo más reciente para no mostrar los viejos
 try:
     res_sorteo = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
     sorteo_actual = res_sorteo.data[0]['sorteo_numero'] if res_sorteo.data else 0
 except:
     sorteo_actual = 0
 
-if sorteo_actual > 0:
-    st.subheader(f"📍 Sorteo Actual: #{sorteo_actual}")
-    
-    # 2. Traer los partidos de ese sorteo
-    partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
-
-    if partidos_db.data:
-        # 3. Consultar la API para ver cuáles están en vivo ahora
-        # Usamos el endpoint 'scores' que da los marcadores actuales
-        url_live = f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}"
-        live_data = requests.get(url_live).json()
-        live_list = live_data.get('data', {}).get('match', []) if live_data.get('success') else []
-
-        # Crear un mapa de partidos en vivo por ID para acceso rápido
-        live_map = {str(m['id']): m for m in live_list}
-
-        for p in partidos_db.data:
-            f_id = str(p['fixture_id'])
-            
-            with st.container():
-                # Si el partido está en el mapa de "En Vivo"
-                if f_id in live_map:
-                    m = live_map[f_id]
-                    st.markdown(f"""
-                    <div class="live-card">
-                        <div style="display: flex; justify-content: space-between;">
-                            <span>Casilla {p['casilla']}</span>
-                            <span class="minute">● {m['time']}'</span>
-                        </div>
-                        <div style="text-align: center;">
-                            <p style="margin:0;">{p['local_nombre']} vs {p['visita_nombre']}</p>
-                            <p class="score">{m['score']}</p>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    # Partido no iniciado o ya finalizado (buscamos en fixtures pasados si es necesario)
-                    st.info(f"Casilla {p['casilla']}: {p['local_nombre']} vs {p['visita_nombre']} - 🕒 {p['hora_mx']}")
-
-    else:
-        st.write("No hay partidos registrados para el sorteo actual.")
+st.title("🏆 Resultados Progol en Vivo")
+if sorteo_actual:
+    st.markdown(f"### 📍 Sorteo Actual: **#{sorteo_actual}**")
 else:
-    st.error("No se encontró ninguna quiniela activa.")
+    st.warning("No se encontraron sorteos activos.")
 
-if st.button("🔄 Actualizar Marcadores"):
-    st.rerun()
+# B. Consultar partidos de la DB y datos en vivo de la API
+if sorteo_actual > 0:
+    # Traer partidos de la DB
+    partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
+    
+    # Traer datos en vivo de la API
+    url_live = f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}"
+    live_list = []
+    try:
+        live_res = requests.get(url_live).json()
+        if live_res.get('success'):
+            live_list = live_res.get('data', {}).get('match', [])
+    except: pass
+    
+    live_map = {str(m['id']): m for m in live_list}
+
+    # ==========================================
+    # 4. RENDERIZADO DE CARTELERA
+    # ==========================================
+    for p in partidos_db.data:
+        f_id = str(p['fixture_id'])
+        esta_en_vivo = f_id in live_map
+        
+        # Datos a mostrar
+        marcador = live_map[f_id]['score'] if esta_en_vivo else "vs"
+        minuto = live_map[f_id]['time'] if esta_en_vivo else p['hora_mx']
+        status_color = "#ff4b4b" if esta_en_vivo else "#00ff88"
+
+        st.markdown(f"""
+            <div class="match-card" style="border-left-color: {status_color}">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="flex: 1; text-align: right;" class="team-name">{p['local_nombre']}</div>
+                    <div style="flex: 1; text-align: center;">
+                        <div class="score-text">{marcador}</div>
+                        {"<span class='live-indicator'>● EN VIVO</span>" if esta_en_vivo else f"<span style='color:gray;'>{minuto}</span>"}
+                        {f"<br><span class='minute-badge'>{minuto}'</span>" if esta_en_vivo else ""}
+                    </div>
+                    <div style="flex: 1; text-align: left;" class="team-name">{p['visita_nombre']}</div>
+                </div>
+                <div style="font-size: 12px; color: gray; margin-top: 10px;">Casilla {p['casilla']} | Sorteo {p['sorteo_numero']}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+st.button("🔄 Actualizar Marcadores")
