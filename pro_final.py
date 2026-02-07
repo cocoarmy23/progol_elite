@@ -20,18 +20,13 @@ st.set_page_config(page_title="Progol Live", layout="wide")
 
 st.markdown("""
     <style>
-    /* Forzar fondo oscuro en toda la app */
-    .stApp {
-        background-color: #0e1117 !important;
-        color: white !important;
-    }
+    .stApp { background-color: #0e1117 !important; color: white !important; }
     .match-card {
         background: #1c2531;
         border-radius: 12px;
         padding: 15px;
         margin-bottom: 12px;
         border-left: 5px solid #00ff88;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
     .live-border { border-left-color: #ff4b4b !important; }
     .score { font-size: 26px; font-weight: bold; color: #ffffff; margin: 0; }
@@ -43,59 +38,60 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. LÓGICA DE FILTRADO CRONOLÓGICO
+# 3. LÓGICA DE FILTRADO (SIN ERROR DE COLUMNA)
 # ==========================================
 
-# Consultamos los sorteos ordenados por ID o creación para obtener el último ingresado
-res_db = supabase.table("quinielas_activas").select("sorteo_numero").order("created_at", desc=True).limit(1).execute()
-
-if res_db.data:
-    sorteo_actual = res_db.data[0]['sorteo_numero']
-    st.markdown(f"<h1 style='text-align: center; color: white;'>🏆 Sorteo #{sorteo_actual}</h1>", unsafe_allow_html=True)
+try:
+    # Cambiamos el orden a 'sorteo_numero' para evitar el error de 'created_at'
+    res_db = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
     
-    # Traer partidos solo de ese sorteo
-    partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
-    
-    # Consultar API Live
-    live_map = {}
-    try:
-        live_res = requests.get(f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}").json()
-        if live_res.get('success'):
-            matches = live_res.get('data', {}).get('match', [])
-            live_map = {str(m['id']): m for m in matches}
-    except: pass
-
-    # ==========================================
-    # 4. RENDERIZADO DE TARJETAS
-    # ==========================================
-    for p in partidos_db.data:
-        f_id = str(p['fixture_id'])
-        esta_en_vivo = f_id in live_map
+    if res_db.data:
+        sorteo_actual = res_db.data[0]['sorteo_numero']
+        st.markdown(f"<h1 style='text-align: center; color: white;'>🏆 Sorteo #{sorteo_actual}</h1>", unsafe_allow_html=True)
         
-        # Marcador y Tiempo
-        score_display = live_map[f_id]['score'] if esta_en_vivo else "vs"
-        time_info = f"<span class='blink'>● EN VIVO {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:#888;'>{p['hora_mx']}</span>"
-        card_style = "match-card live-border" if esta_en_vivo else "match-card"
+        # Traer partidos
+        partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
+        
+        # Consultar API Live
+        live_map = {}
+        try:
+            live_res = requests.get(f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}", timeout=5).json()
+            if live_res.get('success'):
+                matches = live_res.get('data', {}).get('match', [])
+                live_map = {str(m['id']): m for m in matches}
+        except: pass
 
-        # HTML Limpio
-        card_html = f"""
-        <div class="{card_style}">
-            <div style="display: flex; justify-content: space-between; align-items: center; text-align: center;">
-                <div class="team" style="text-align: right;">{p['local_nombre']}</div>
-                <div style="width: 20%;">
-                    <div class="score">{score_display}</div>
-                    {time_info}
+        # ==========================================
+        # 4. RENDERIZADO
+        # ==========================================
+        for p in partidos_db.data:
+            f_id = str(p['fixture_id'])
+            esta_en_vivo = f_id in live_map
+            
+            score_display = live_map[f_id]['score'] if esta_en_vivo else "vs"
+            time_info = f"<span class='blink'>● EN VIVO {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:#888;'>{p['hora_mx']}</span>"
+            card_style = "match-card live-border" if esta_en_vivo else "match-card"
+
+            st.markdown(f"""
+                <div class="{card_style}">
+                    <div style="display: flex; justify-content: space-between; align-items: center; text-align: center;">
+                        <div class="team" style="text-align: right;">{p['local_nombre']}</div>
+                        <div style="width: 20%;">
+                            <div class="score">{score_display}</div>
+                            {time_info}
+                        </div>
+                        <div class="team" style="text-align: left;">{p['visita_nombre']}</div>
+                    </div>
+                    <div class="info-footer">Casilla {p['casilla']}</div>
                 </div>
-                <div class="team" style="text-align: left;">{p['visita_nombre']}</div>
-            </div>
-            <div class="info-footer">
-                Casilla {p['casilla']} | Estado: {"Jugándose" if esta_en_vivo else "Programado"}
-            </div>
-        </div>
-        """
-        st.markdown(card_html, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No hay sorteos registrados.")
 
-else:
-    st.markdown("<h3 style='text-align: center;'>No hay quinielas activas registradas.</h3>", unsafe_allow_html=True)
+except Exception as e:
+    st.error("Error de conexión con la base de datos.")
+    # Opción de rescate si el orden falla:
+    if st.button("Intentar cargar sin orden"):
+        st.rerun()
 
 st.button("🔄 Actualizar Resultados")
