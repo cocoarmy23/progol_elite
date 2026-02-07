@@ -4,7 +4,7 @@ from supabase import create_client
 from datetime import datetime
 
 # ==========================================
-# 1. CREDENCIALES
+# 1. CONFIGURACIÓN
 # ==========================================
 URL_SUPABASE = "https://xavzjoyjausutoscosaw.supabase.co"
 KEY_SUPABASE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhdnpqb3lqYXVzdXRvc2Nvc2F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NjAwNzksImV4cCI6MjA4NTUzNjA3OX0.YjHw-NVeuVpK5l4XkM3hft1vSrERRBXEWZl2wPNjZ0k"
@@ -14,42 +14,55 @@ SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 
 # ==========================================
-# 2. ESTILO PREMIUM OSCURO (FORZADO)
+# 2. ESTILO PREMIUM CON ESCUDOS
 # ==========================================
-st.set_page_config(page_title="Progol Live", layout="wide")
+st.set_page_config(page_title="Progol Live Premium", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117 !important; color: white !important; }
     .match-card {
-        background: #1c2531;
-        border-radius: 12px;
-        padding: 15px;
-        margin-bottom: 12px;
-        border-left: 5px solid #00ff88;
+        background: linear-gradient(90deg, #1c2531 0%, #253142 100%);
+        border-radius: 15px;
+        padding: 20px;
+        margin-bottom: 15px;
+        border-left: 6px solid #00ff88;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.5);
     }
     .live-border { border-left-color: #ff4b4b !important; }
-    .score { font-size: 26px; font-weight: bold; color: #ffffff; margin: 0; }
-    .team { font-size: 16px; color: #ffffff; font-weight: 600; width: 40%; }
+    .team-box { width: 35%; display: flex; flex-direction: column; align-items: center; }
+    .team-logo { width: 60px; height: 60px; object-fit: contain; margin-bottom: 8px; }
+    .team-name { font-size: 16px; font-weight: bold; text-align: center; color: #fff; }
+    .score-container { width: 30%; text-align: center; }
+    .score-box { 
+        font-size: 36px; 
+        font-weight: 900; 
+        color: #00ff88; 
+        background: rgba(0,0,0,0.3); 
+        padding: 5px 15px; 
+        border-radius: 10px;
+        display: inline-block;
+        margin-bottom: 5px;
+    }
+    .live-score { color: #ff4b4b !important; }
     .blink { animation: blinker 1.5s linear infinite; color: #ff4b4b; font-weight: bold; font-size: 14px; }
     @keyframes blinker { 50% { opacity: 0; } }
-    .info-footer { font-size: 11px; color: #888; margin-top: 8px; border-top: 1px solid #2d3748; padding-top: 5px; }
+    .casilla-tag { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. LÓGICA DE FILTRADO (SIN ERROR DE COLUMNA)
+# 3. LÓGICA DE DATOS
 # ==========================================
 
 try:
-    # Cambiamos el orden a 'sorteo_numero' para evitar el error de 'created_at'
+    # Obtener último sorteo
     res_db = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
     
     if res_db.data:
         sorteo_actual = res_db.data[0]['sorteo_numero']
-        st.markdown(f"<h1 style='text-align: center; color: white;'>🏆 Sorteo #{sorteo_actual}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='text-align: center;'>🏆 Sorteo #{sorteo_actual}</h1>", unsafe_allow_html=True)
         
-        # Traer partidos
         partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", sorteo_actual).order("casilla").execute()
         
         # Consultar API Live
@@ -62,36 +75,49 @@ try:
         except: pass
 
         # ==========================================
-        # 4. RENDERIZADO
+        # 4. RENDERIZADO DE CARTELERA
         # ==========================================
         for p in partidos_db.data:
             f_id = str(p['fixture_id'])
             esta_en_vivo = f_id in live_map
             
-            score_display = live_map[f_id]['score'] if esta_en_vivo else "vs"
-            time_info = f"<span class='blink'>● EN VIVO {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:#888;'>{p['hora_mx']}</span>"
-            card_style = "match-card live-border" if esta_en_vivo else "match-card"
+            marcador = live_map[f_id]['score'] if esta_en_vivo else "VS"
+            tiempo = f"<span class='blink'>● {live_map[f_id]['time']}'</span>" if esta_en_vivo else f"<span style='color:gray;'>{p['hora_mx']}</span>"
+            estilo_vivo = "live-border" if esta_en_vivo else ""
+            color_marcador = "live-score" if esta_en_vivo else ""
+
+            # URLs de Escudos (Usando un servicio de imágenes por nombre o ID)
+            # Nota: Sustituimos espacios por %20 para la URL
+            logo_local = f"https://api.sofascore.app/api/v1/team/{p['fixture_id']}/image" # Intento por ID
+            # Si prefieres una opción más segura por nombre:
+            logo_local = f"https://tse1.mm.bing.net/th?q={p['local_nombre']}+logo+football&w=100&h=100&c=7&rs=1&qlt=90&o=6&pid=3.1"
+            logo_visita = f"https://tse1.mm.bing.net/th?q={p['visita_nombre']}+logo+football&w=100&h=100&c=7&rs=1&qlt=90&o=6&pid=3.1"
 
             st.markdown(f"""
-                <div class="{card_style}">
-                    <div style="display: flex; justify-content: space-between; align-items: center; text-align: center;">
-                        <div class="team" style="text-align: right;">{p['local_nombre']}</div>
-                        <div style="width: 20%;">
-                            <div class="score">{score_display}</div>
-                            {time_info}
+                <div class="match-card {estilo_vivo}">
+                    <div class="casilla-tag">Casilla {p['casilla']}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                        <div class="team-box">
+                            <img src="{logo_local}" class="team-logo">
+                            <div class="team-name">{p['local_nombre']}</div>
                         </div>
-                        <div class="team" style="text-align: left;">{p['visita_nombre']}</div>
+                        
+                        <div class="score-container">
+                            <div class="score-box {color_marcador}">{marcador}</div>
+                            <div style="margin-top: 5px;">{tiempo}</div>
+                        </div>
+                        
+                        <div class="team-box">
+                            <img src="{logo_visita}" class="team-logo">
+                            <div class="team-name">{p['visita_nombre']}</div>
+                        </div>
                     </div>
-                    <div class="info-footer">Casilla {p['casilla']}</div>
                 </div>
             """, unsafe_allow_html=True)
     else:
-        st.info("No hay sorteos registrados.")
+        st.info("Cargando cartelera...")
 
 except Exception as e:
-    st.error("Error de conexión con la base de datos.")
-    # Opción de rescate si el orden falla:
-    if st.button("Intentar cargar sin orden"):
-        st.rerun()
+    st.error(f"Error: {e}")
 
-st.button("🔄 Actualizar Resultados")
+st.button("🔄 Actualizar en Vivo")
