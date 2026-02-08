@@ -109,4 +109,13 @@ try:
                         </div>
                         <div style="width:35%;">
                             <div class="logo-container"><img src="{v_logo}" class="team-logo"></div>
-                            <div style="margin-top:10px; font-weight:bold;">{p
+                            <div style="margin-top:10px; font-weight:bold;">{p['visita_nombre']}</div>
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.warning("No hay sorteos activos en la base de datos.")
+
+except Exception as e:
+    st.error(f"Error en la sincronización: {e}")
