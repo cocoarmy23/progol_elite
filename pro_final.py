@@ -30,73 +30,77 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 4. FUNCIÓN DE BARRIDO (Live + History)
-def obtener_datos_completos_api():
-    bolsa_partidos = []
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+# 4. BARRIDO DE API (LIVE + HISTORY)
+def obtener_datos_api():
+    bolsa = []
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    # Consultamos ambos endpoints
     urls = [
         f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}",
-        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=1",
-        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=2"
+        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={hoy}"
     ]
     for url in urls:
         try:
-            res = requests.get(url, timeout=10).json()
-            if res.get('success'):
-                matches = res.get('data', {}).get('match', [])
-                if isinstance(matches, list): bolsa_partidos.extend(matches)
+            r = requests.get(url, timeout=10).json()
+            if r.get('success'):
+                matches = r.get('data', {}).get('match', [])
+                if isinstance(matches, list): bolsa.extend(matches)
         except: continue
-    return bolsa_partidos
+    return bolsa
 
-# 5. LÓGICA DE PANTALLA
+# 5. LÓGICA PRINCIPAL
 try:
-    query_res = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
+    res = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
     
-    if query_res.data:
-        ultimo_sorteo = query_res.data[0]['sorteo_numero']
-        st.markdown(f'<div class="header-sorteo">🏆 <b>PROGOL - SORTEO {ultimo_sorteo}</b></div>', unsafe_allow_html=True)
+    if res.data:
+        num_sorteo = res.data[0]['sorteo_numero']
+        st.markdown(f'<div class="header-sorteo">🏆 <b>PROGOL - SORTEO {num_sorteo}</b></div>', unsafe_allow_html=True)
 
-        partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", ultimo_sorteo).order("casilla").execute().data
-        api_pool = obtener_datos_completos_api()
+        partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", num_sorteo).order("casilla").execute().data
+        api_data = obtener_datos_api()
 
         for p in partidos_db:
-            f_id = str(p['fixture_id']).strip()
-            local_db = p['local_nombre'].upper()
+            # ID de referencia de tu base de datos
+            target_id = str(p['fixture_id']).strip()
+            name_local = p['local_nombre'].upper().strip()
             
-            match_data = None
-            for m in api_pool:
-                # Comparamos fixture_id o nombre (como respaldo)
-                if str(m.get('fixture_id')) == f_id or local_db in str(m.get('home', {}).get('name', '')).upper() or local_db in str(m.get('home_name', '')).upper():
-                    match_data = m
+            match_found = None
+            # BUSCAMOS EL PARTIDO EN EL RESULTADO DE LA API
+            for m in api_data:
+                # 1. Intentamos por fixture_id (el campo que aparece en tu JSON)
+                api_fixture_id = str(m.get('fixture_id', ''))
+                # 2. Intentamos por id normal
+                api_id = str(m.get('id', ''))
+                # 3. Intentamos por nombre dentro del objeto 'home'
+                api_home_name = str(m.get('home', {}).get('name', m.get('home_name', ''))).upper()
+
+                if target_id == api_fixture_id or target_id == api_id or name_local in api_home_name:
+                    match_found = m
                     break
             
             marcador = "0 - 0"
             status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
 
-            if match_data:
-                # --- CORRECCIÓN CRÍTICA AQUÍ ---
-                # Buscamos 'score' dentro del objeto 'scores' como mostraste en el JSON
-                api_scores = match_data.get('scores', {})
-                if isinstance(api_scores, dict):
-                    marcador = api_scores.get('score') or match_data.get('score') or "0 - 0"
+            if match_found:
+                # EXTRAER MARCADOR (Según tu JSON: scores -> score)
+                s_obj = match_found.get('scores', {})
+                if isinstance(s_obj, dict):
+                    marcador = s_obj.get('score') or s_obj.get('ft_score') or match_found.get('score', "0 - 0")
                 else:
-                    marcador = match_data.get('score') or "0 - 0"
-                
-                t = str(match_data.get('time', '')).upper()
-                s = str(match_data.get('status', '')).upper()
+                    marcador = match_found.get('score', "0 - 0")
 
-                if t == "FT" or s in ["FT", "FINISHED"]:
+                # ESTADO Y TIEMPO
+                t = str(match_found.get('time', '')).upper()
+                s = str(match_found.get('status', '')).upper()
+
+                if t == "FT" or s in ["FINISHED", "FT"]:
                     status_html = '<span style="color: #00ff88;">✅ FINALIZADO</span>'
                 elif s == "HT":
                     status_html = '<span class="status-live">🔴 MEDIO TIEMPO</span>'
                 else:
-                    min_limpio = t.replace("'", "")
-                    if min_limpio.isdigit() or "+" in min_limpio:
-                        status_html = f'<span class="status-live">🔴 {t}\'</span>'
-                    else:
-                        status_html = f'<span class="status-live">🔴 {t}</span>'
-            
-            # Logos
+                    status_html = f'<span class="status-live">🔴 {t}\'</span>' if t.replace("'", "").isdigit() else f'<span class="status-live">🔴 {t}</span>'
+
+            # Logos e Interfaz
             l_logo = f"https://tse1.mm.bing.net/th?q={p['local_nombre']}+football+logo&w=100&h=100&c=7"
             v_logo = f"https://tse1.mm.bing.net/th?q={p['visita_nombre']}+football+logo&w=100&h=100&c=7"
 
