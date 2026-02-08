@@ -4,7 +4,7 @@ from supabase import create_client
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# 1. CONFIGURACIÓN Y REFRESCO (Cada 60 segundos)
+# 1. CONFIGURACIÓN Y REFRESCO (60 segundos)
 st_autorefresh(interval=60000, key="sorteo_api_update")
 st.set_page_config(page_title="Progol Live Elite", layout="wide")
 
@@ -16,7 +16,7 @@ SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-# 3. ESTILOS CSS (Sin cambios, se mantienen tus estilos visuales)
+# 3. ESTILOS CSS
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: white; }
@@ -30,67 +30,58 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 4. FUNCIÓN DE BARRIDO API
+# 4. FUNCIÓN DE BARRIDO API MEJORADA
 def obtener_datos_completos_api():
     bolsa_partidos = []
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
-    # Endpoints para obtener resultados actuales e históricos del día
+    # Consultamos Live y History para asegurar que tenemos lo que está pasando y lo que ya pasó hoy
     urls = [
-        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=1",
-        f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}"
+        f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}",
+        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}"
     ]
     for url in urls:
         try:
             res = requests.get(url, timeout=10).json()
             if res.get('success'):
-                # La API puede devolver 'match' o 'fixtures' dependiendo del endpoint
+                # Intentamos extraer de 'match' o 'fixtures'
                 matches = res.get('data', {}).get('match', []) or res.get('data', {}).get('fixtures', [])
-                if isinstance(matches, list): bolsa_partidos.extend(matches)
+                if isinstance(matches, list):
+                    bolsa_partidos.extend(matches)
         except: continue
     return bolsa_partidos
 
-# 5. LÓGICA CORREGIDA (sorteo -> sorteo_numero)
+# 5. LÓGICA DE PANTALLA
 try:
-    # A. Obtener el número del sorteo más alto disponible (CAMBIO AQUÍ)
     query_sorteo = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
     
     if query_sorteo.data:
         ultimo_sorteo = query_sorteo.data[0]['sorteo_numero']
         st.markdown(f'<div class="header-sorteo">🏆 <b>PROGOL - SORTEO {ultimo_sorteo}</b></div>', unsafe_allow_html=True)
 
-        # B. Traer solo los partidos de ese sorteo (CAMBIO AQUÍ)
         partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", ultimo_sorteo).order("casilla").execute().data
-        
-        # C. Traer datos de API
         api_pool = obtener_datos_completos_api()
 
-        # D. Pintar partidos
         for p in partidos_db:
             id_buscado = str(p['fixture_id']).strip()
-            local_db = p['local_nombre'].upper()
+            match_data = next((m for m in api_pool if str(m.get('id')) == id_buscado), None)
             
-            match_data = None
-            # Buscamos en la bolsa de la API por ID o por nombre del local
-            for m in api_pool:
-                if str(m.get('id')).strip() == id_buscado or local_db in str(m.get('home_name')).upper():
-                    match_data = m
-                    break
-            
+            marcador = "0 - 0"
+            status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
+
             if match_data:
-                # Si la API tiene el partido, sacamos el marcador real
-                marcador = match_data.get('score', '0 - 0')
-                tiempo = str(match_data.get('time', '')).upper()
+                # 1. Extraer Marcador (Priorizar score o full_time_score)
+                marcador = match_data.get('score') or match_data.get('ft_score') or marcador
                 
-                if tiempo == "FT":
+                # 2. Extraer Tiempo / Estado
+                # La API usa 'status' para vivos (LIVE, HT) y 'time' para el minuto o FT
+                status_api = str(match_data.get('status', '')).upper()
+                tiempo_api = str(match_data.get('time', '')).upper()
+
+                if status_api in ["FINISHED", "FT"] or tiempo_api == "FT":
                     status_html = '<span style="color: #00ff88;">✅ FINALIZADO</span>'
-                elif tiempo in ["HT", "LIVE"] or (tiempo.isdigit()):
-                    status_html = f'<span class="status-live">🔴 EN VIVO {tiempo}\'</span>'
-                else:
-                    status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
-            else:
-                # Si no está en la API todavía (partido futuro)
-                marcador = "0 - 0"
-                status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
+                elif status_api in ["LIVE", "IN PLAY", "HT"] or tiempo_api.isdigit():
+                    # Si tiempo_api es un número, es el minuto. Si es HT es medio tiempo.
+                    minuto = f"{tiempo_api}'" if tiempo_api.isdigit() else tiempo_api
+                    status_html = f'<span class="status-live">🔴 {minuto}</span>'
 
             # Logos dinámicos
             l_logo = f"https://tse1.mm.bing.net/th?q={p['local_nombre']}+football+logo&w=100&h=100&c=7"
@@ -115,7 +106,7 @@ try:
                 </div>
             """, unsafe_allow_html=True)
     else:
-        st.warning("No hay sorteos activos en la base de datos.")
+        st.warning("No hay sorteos activos.")
 
 except Exception as e:
-    st.error(f"Error en la sincronización: {e}")
+    st.error(f"Error: {e}")
