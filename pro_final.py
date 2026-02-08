@@ -16,7 +16,7 @@ SECRET = "9pNSRVoddsshE1elR1tj4TaRVTRNBVNL"
 
 supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-# 3. ESTILOS CSS (Mantenemos tus estilos originales)
+# 3. ESTILOS CSS
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: white; }
@@ -30,38 +30,40 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 4. TU FUNCIÓN ORIGINAL DE BARRIDO (Esta es la que funcionaba)
+# 4. FUNCIÓN DE BARRIDO ROBUSTO (Enfocada en History e IDs)
 def obtener_datos_completos_api():
     bolsa_partidos = []
     fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+    
+    # Añadimos más páginas de history para asegurar que barremos todos los terminados del día
     urls = [
+        f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}",
         f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=1",
         f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=2",
-        f"https://livescore-api.com/api-client/scores/live.json?key={API_KEY}&secret={SECRET}"
+        f"https://livescore-api.com/api-client/scores/history.json?key={API_KEY}&secret={SECRET}&from={fecha_hoy}&page=3"
     ]
+    
     for url in urls:
         try:
             res = requests.get(url, timeout=10).json()
             if res.get('success'):
-                # Buscamos en 'match' o 'fixtures' según lo que devuelva cada endpoint
+                # La API de history usa 'match', la de live a veces 'match' o 'fixtures'
                 matches = res.get('data', {}).get('match', []) or res.get('data', {}).get('fixtures', [])
-                if isinstance(matches, list): bolsa_partidos.extend(matches)
-        except: continue
+                if isinstance(matches, list):
+                    bolsa_partidos.extend(matches)
+        except:
+            continue
     return bolsa_partidos
 
-# 5. LÓGICA DE FILTRADO (Corregida con sorteo_numero)
+# 5. LÓGICA DE VISUALIZACIÓN
 try:
-    # Cambiamos 'sorteo' por 'sorteo_numero' en la consulta
-    query_sorteo = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
+    query_res = supabase.table("quinielas_activas").select("sorteo_numero").order("sorteo_numero", desc=True).limit(1).execute()
     
-    if query_sorteo.data:
-        ultimo_sorteo = query_sorteo.data[0]['sorteo_numero']
+    if query_res.data:
+        ultimo_sorteo = query_res.data[0]['sorteo_numero']
         st.markdown(f'<div class="header-sorteo">🏆 <b>PROGOL - SORTEO {ultimo_sorteo}</b></div>', unsafe_allow_html=True)
 
-        # Traemos los partidos usando la columna correcta
         partidos_db = supabase.table("quinielas_activas").select("*").eq("sorteo_numero", ultimo_sorteo).order("casilla").execute().data
-        
-        # Ejecutamos tu barrido de API
         api_pool = obtener_datos_completos_api()
 
         for p in partidos_db:
@@ -69,30 +71,35 @@ try:
             local_db = p['local_nombre'].upper()
             
             match_data = None
-            # Tu lógica de búsqueda original (ID o Nombre)
+            # Búsqueda por ID (Prioridad) y Nombre (Respaldo)
             for m in api_pool:
-                if str(m.get('id')).strip() == id_buscado or local_db in str(m.get('home_name', '')).upper():
+                m_id = str(m.get('id', '')).strip()
+                m_home = str(m.get('home_name', '')).upper()
+                if m_id == id_buscado or local_db in m_home:
                     match_data = m
                     break
             
-            if match_data:
-                # Marcador real de la API
-                marcador = match_data.get('score', '0 - 0')
-                tiempo = str(match_data.get('time', '')).upper()
-                
-                # Tu lógica de estados original
-                if tiempo == "FT":
-                    status_html = '<span style="color: #00ff88;">✅ FINALIZADO</span>'
-                else:
-                    # Mejoramos ligeramente la detección de en vivo para que use el número
-                    minuto = f"{tiempo}'" if tiempo.isdigit() else tiempo
-                    status_html = f'<span class="status-live">🔴 EN VIVO {minuto}</span>'
-            else:
-                # Si no hay datos, marcador 0-0 y hora de la DB
-                marcador = "0 - 0"
-                status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
+            marcador = "0 - 0"
+            status_html = f'<span style="color: #aaa;">🕒 {p["hora_mx"]}</span>'
 
-            # Logos con Bing
+            if match_data:
+                # REVISIÓN DE MARCADOR ROBUSTA
+                # Intentamos obtener 'score', si no existe 'ft_score' (común en history)
+                marcador = match_data.get('score') or match_data.get('ft_score') or "0 - 0"
+                
+                # REVISIÓN DE ESTADO
+                status_api = str(match_data.get('status', '')).upper()
+                tiempo_api = str(match_data.get('time', '')).upper()
+
+                if status_api in ["FT", "FINISHED"] or tiempo_api == "FT":
+                    status_html = '<span style="color: #00ff88;">✅ FINALIZADO</span>'
+                elif status_api == "HT":
+                    status_html = '<span class="status-live">🔴 MEDIO TIEMPO</span>'
+                elif status_api in ["LIVE", "IN PLAY"] or tiempo_api.isdigit():
+                    minuto = f"{tiempo_api}'" if tiempo_api.isdigit() else "VIVO"
+                    status_html = f'<span class="status-live">🔴 {minuto}</span>'
+            
+            # Logos
             l_logo = f"https://tse1.mm.bing.net/th?q={p['local_nombre']}+football+logo&w=100&h=100&c=7"
             v_logo = f"https://tse1.mm.bing.net/th?q={p['visita_nombre']}+football+logo&w=100&h=100&c=7"
 
@@ -114,8 +121,9 @@ try:
                     </div>
                 </div>
             """, unsafe_allow_html=True)
+
     else:
-        st.warning("No hay sorteos activos en la base de datos.")
+        st.warning("No hay sorteos activos.")
 
 except Exception as e:
-    st.error(f"Error en la sincronización: {e}")
+    st.error(f"Error en sincronización: {e}")
